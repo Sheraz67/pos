@@ -4,6 +4,7 @@ import 'bill_item.dart';
 class Bill extends HiveObject {
   String id;
   String customerName;       // گاہک کا نام
+  String? customerPhone;     // گاہک کا فون نمبر
   DateTime date;             // تاریخ
   List<BillItem> items;      // آئٹمز
   double subtotal;           // اس بل کا ٹوٹل (items only)
@@ -19,6 +20,7 @@ class Bill extends HiveObject {
   Bill({
     required this.id,
     required this.customerName,
+    this.customerPhone,
     required this.date,
     required this.items,
     required this.subtotal,
@@ -36,6 +38,7 @@ class Bill extends HiveObject {
     return {
       'id': id,
       'customerName': customerName,
+      'customerPhone': customerPhone,
       'date': date.toIso8601String(),
       'items': items.map((e) => e.toMap()).toList(),
       'subtotal': subtotal,
@@ -54,6 +57,7 @@ class Bill extends HiveObject {
     return Bill(
       id: map['id'],
       customerName: map['customerName'],
+      customerPhone: map['customerPhone'],
       date: DateTime.parse(map['date']),
       items: (map['items'] as List)
           .map((e) => BillItem.fromMap(Map<String, dynamic>.from(e)))

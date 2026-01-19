@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:uuid/uuid.dart';
@@ -19,6 +20,7 @@ class NewBillScreen extends StatefulWidget {
 
 class _NewBillScreenState extends State<NewBillScreen> {
   final _customerController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _discountController = TextEditingController(text: '0');
   final _receivedController = TextEditingController(text: '0');
   final _uuid = const Uuid();
@@ -41,9 +43,10 @@ class _NewBillScreenState extends State<NewBillScreen> {
     // Add first empty row
     _addNewRow();
 
-    // If linked bill, pre-fill customer name and add previous balance
+    // If linked bill, pre-fill customer name, phone and add previous balance
     if (widget.linkedBill != null) {
       _customerController.text = widget.linkedBill!.customerName;
+      _phoneController.text = widget.linkedBill!.customerPhone ?? '';
     }
   }
 
@@ -154,9 +157,11 @@ class _NewBillScreenState extends State<NewBillScreen> {
 
     // Create bill
     final billId = _uuid.v4();
+    final phoneNumber = _phoneController.text.trim();
     final bill = Bill(
       id: billId,
       customerName: _customerController.text.trim(),
+      customerPhone: phoneNumber.isNotEmpty ? phoneNumber : null,
       date: DateTime.now(),
       items: billItems,
       subtotal: _subtotal,
@@ -304,6 +309,25 @@ class _NewBillScreenState extends State<NewBillScreen> {
                                   });
                                 }
                               },
+                            ),
+                            const SizedBox(height: 12),
+                            // Customer phone number
+                            TextField(
+                              controller: _phoneController,
+                              decoration: InputDecoration(
+                                labelText: 'فون نمبر (اختیاری)',
+                                labelStyle: GoogleFonts.notoNastaliqUrdu(),
+                                hintText: '03001234567',
+                                hintStyle: GoogleFonts.roboto(color: Colors.grey),
+                                border: const OutlineInputBorder(),
+                                prefixIcon: const Icon(Icons.phone),
+                              ),
+                              style: GoogleFonts.roboto(fontSize: 18),
+                              keyboardType: TextInputType.phone,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                                LengthLimitingTextInputFormatter(11),
+                              ],
                             ),
                           ],
                         ),
@@ -484,6 +508,7 @@ class _NewBillScreenState extends State<NewBillScreen> {
   @override
   void dispose() {
     _customerController.dispose();
+    _phoneController.dispose();
     _discountController.dispose();
     _receivedController.dispose();
     super.dispose();

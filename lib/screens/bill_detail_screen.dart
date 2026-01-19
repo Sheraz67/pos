@@ -1,11 +1,18 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:uuid/uuid.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../services/database_service.dart';
+import '../services/pdf_service.dart';
 import 'new_bill_screen.dart';
+
+// Web-specific imports (conditional)
+import 'web_download_stub.dart' if (dart.library.html) 'web_download.dart' as web_download;
 
 class BillDetailScreen extends StatefulWidget {
   final Bill bill;
@@ -223,6 +230,145 @@ class _BillDetailScreenState extends State<BillDetailScreen> {
     }
   }
 
+  Future<void> _shareBillPdf() async {
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(width: 16),
+              Text(
+                'PDF بن رہی ہے...',
+                style: GoogleFonts.notoNastaliqUrdu(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    try {
+      if (kIsWeb) {
+        // Web: Download PDF directly
+        final pdfBytes = await PdfService.generateBillPdfBytes(_bill);
+        final fileName = PdfService.getBillFileName(_bill);
+
+        // Close loading dialog
+        if (mounted) Navigator.pop(context);
+
+        // Trigger download
+        web_download.downloadPdf(pdfBytes, fileName);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'PDF ڈاؤن لوڈ ہو رہی ہے',
+                style: GoogleFonts.notoNastaliqUrdu(),
+                textDirection: TextDirection.rtl,
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        // Mobile: Generate file and share
+        final pdfFile = await PdfService.generateBillPdfFile(_bill);
+
+        // Close loading dialog
+        if (mounted) Navigator.pop(context);
+
+        // If customer has phone number, open WhatsApp directly
+        if (_bill.customerPhone != null && _bill.customerPhone!.isNotEmpty) {
+          // Format phone number for WhatsApp (Pakistan format)
+          String phoneNumber = _bill.customerPhone!;
+          // Remove any spaces or dashes
+          phoneNumber = phoneNumber.replaceAll(RegExp(r'[\s\-]'), '');
+          // Convert 03xx to 923xx format for WhatsApp
+          if (phoneNumber.startsWith('0')) {
+            phoneNumber = '92${phoneNumber.substring(1)}';
+          }
+
+          final message = 'بل - ${_bill.customerName}\nکل رقم: ${_bill.total.toStringAsFixed(0)} روپے\nبقایا: ${_bill.remaining.toStringAsFixed(0)} روپے';
+
+          // First share the PDF file
+          await Share.shareXFiles(
+            [XFile(pdfFile.path)],
+            text: message,
+          );
+
+          // Then show option to open WhatsApp directly
+          if (mounted) {
+            final openWhatsApp = await showDialog<bool>(
+              context: context,
+              builder: (context) => Directionality(
+                textDirection: TextDirection.rtl,
+                child: AlertDialog(
+                  title: Text(
+                    'واٹس ایپ کھولیں؟',
+                    style: GoogleFonts.notoNastaliqUrdu(fontWeight: FontWeight.bold),
+                  ),
+                  content: Text(
+                    'کیا آپ ${_bill.customerPhone} پر واٹس ایپ کھولنا چاہتے ہیں؟',
+                    style: GoogleFonts.notoNastaliqUrdu(),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: Text('نہیں', style: GoogleFonts.notoNastaliqUrdu()),
+                    ),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: Text('ہاں', style: GoogleFonts.notoNastaliqUrdu()),
+                    ),
+                  ],
+                ),
+              ),
+            );
+
+            if (openWhatsApp == true) {
+              final whatsappUrl = Uri.parse('https://wa.me/$phoneNumber?text=${Uri.encodeComponent(message)}');
+              if (await canLaunchUrl(whatsappUrl)) {
+                await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication);
+              }
+            }
+          }
+        } else {
+          // No phone number, just share normally
+          await Share.shareXFiles(
+            [XFile(pdfFile.path)],
+            text: 'بل - ${_bill.customerName}\nکل رقم: ${_bill.total.toStringAsFixed(0)} روپے\nبقایا: ${_bill.remaining.toStringAsFixed(0)} روپے',
+          );
+        }
+      }
+    } catch (e) {
+      // Close loading dialog
+      if (mounted) Navigator.pop(context);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'PDF بنانے میں خرابی: $e',
+              style: GoogleFonts.notoNastaliqUrdu(),
+              textDirection: TextDirection.rtl,
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _deleteBill() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -284,6 +430,11 @@ class _BillDetailScreenState extends State<BillDetailScreen> {
           backgroundColor: const Color(0xFF1a3a6e),
           foregroundColor: Colors.white,
           actions: [
+            IconButton(
+              onPressed: _shareBillPdf,
+              icon: const Icon(Icons.share),
+              tooltip: 'واٹس ایپ پر بھیجیں',
+            ),
             IconButton(
               onPressed: _deleteBill,
               icon: const Icon(Icons.delete),
@@ -405,6 +556,22 @@ class _BillDetailScreenState extends State<BillDetailScreen> {
                           color: Colors.grey[600],
                         ),
                       ),
+                      if (_bill.customerPhone != null && _bill.customerPhone!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(Icons.phone, size: 16, color: Colors.grey[600]),
+                            const SizedBox(width: 4),
+                            Text(
+                              _bill.customerPhone!,
+                              style: GoogleFonts.roboto(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
