@@ -11,8 +11,11 @@ import 'bills_screen.dart';
 
 class NewBillScreen extends StatefulWidget {
   final Bill? linkedBill; // For linking to previous bill
+  final Bill? editBill;   // For editing existing bill
 
-  const NewBillScreen({super.key, this.linkedBill});
+  const NewBillScreen({super.key, this.linkedBill, this.editBill});
+
+  bool get isEditMode => editBill != null;
 
   @override
   State<NewBillScreen> createState() => _NewBillScreenState();
@@ -40,13 +43,41 @@ class _NewBillScreenState extends State<NewBillScreen> {
   @override
   void initState() {
     super.initState();
-    // Add first empty row
-    _addNewRow();
 
-    // If linked bill, pre-fill customer name, phone and add previous balance
-    if (widget.linkedBill != null) {
-      _customerController.text = widget.linkedBill!.customerName;
-      _phoneController.text = widget.linkedBill!.customerPhone ?? '';
+    if (widget.isEditMode) {
+      // Edit mode: pre-fill all fields from existing bill
+      final bill = widget.editBill!;
+      _customerController.text = bill.customerName;
+      _phoneController.text = bill.customerPhone ?? '';
+      _discountController.text = bill.discount.toStringAsFixed(0);
+      _receivedController.text = bill.received.toStringAsFixed(0);
+
+      // Convert BillItems to BillItemData
+      for (final item in bill.items) {
+        _billItems.add(BillItemData(
+          id: item.id,
+          itemId: item.itemId,
+          itemName: item.itemName,
+          unit: item.unit,
+          quantity: item.quantity,
+          price: item.price,
+          amount: item.amount,
+        ));
+      }
+
+      // Calculate totals after loading items
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _calculateTotals();
+      });
+    } else {
+      // New bill mode: add first empty row
+      _addNewRow();
+
+      // If linked bill, pre-fill customer name, phone and add previous balance
+      if (widget.linkedBill != null) {
+        _customerController.text = widget.linkedBill!.customerName;
+        _phoneController.text = widget.linkedBill!.customerPhone ?? '';
+      }
     }
   }
 
@@ -80,9 +111,11 @@ class _NewBillScreenState extends State<NewBillScreen> {
     final discountText = _discountController.text.trim();
     final parsedDiscount = double.tryParse(discountText);
 
-    // Add previous bill balance if linked
+    // Add previous bill balance if linked (or from edit bill)
     double previousBalance = 0;
-    if (widget.linkedBill != null) {
+    if (widget.isEditMode) {
+      previousBalance = widget.editBill!.previousRemaining;
+    } else if (widget.linkedBill != null) {
       previousBalance = widget.linkedBill!.remaining;
     }
 
@@ -152,44 +185,74 @@ class _NewBillScreenState extends State<NewBillScreen> {
       );
     }).toList();
 
-    // Calculate previous remaining from linked bill
-    final previousRemaining = widget.linkedBill?.remaining ?? 0;
-
-    // Create bill
-    final billId = _uuid.v4();
     final phoneNumber = _phoneController.text.trim();
-    final bill = Bill(
-      id: billId,
-      customerName: _customerController.text.trim(),
-      customerPhone: phoneNumber.isNotEmpty ? phoneNumber : null,
-      date: DateTime.now(),
-      items: billItems,
-      subtotal: _subtotal,
-      previousRemaining: previousRemaining,
-      discount: _discount,
-      total: _total,
-      received: _received,
-      remaining: _remaining,
-      linkedBillId: widget.linkedBill?.id,
-      status: _remaining <= 0 ? 'paid' : 'pending',
-    );
 
-    // Save to database
-    await DatabaseService.saveBill(bill);
+    if (widget.isEditMode) {
+      // Edit mode: Update existing bill
+      final existingBill = widget.editBill!;
 
-    // Update linked bill if exists - set nextBillId and status to transferred
-    if (widget.linkedBill != null) {
-      widget.linkedBill!.nextBillId = billId;
-      widget.linkedBill!.status = 'transferred';
-      await DatabaseService.saveBill(widget.linkedBill!);
-    }
-
-    if (mounted) {
-      _showSuccess('بل محفوظ ہو گیا');
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const BillsScreen()),
+      final updatedBill = Bill(
+        id: existingBill.id,
+        customerName: _customerController.text.trim(),
+        customerPhone: phoneNumber.isNotEmpty ? phoneNumber : null,
+        date: existingBill.date, // Keep original date
+        items: billItems,
+        subtotal: _subtotal,
+        previousRemaining: existingBill.previousRemaining, // Keep original previous balance
+        discount: _discount,
+        total: _total,
+        received: _received,
+        remaining: _remaining,
+        linkedBillId: existingBill.linkedBillId, // Keep linked bill relationship
+        nextBillId: existingBill.nextBillId, // Keep next bill relationship
+        status: _remaining <= 0 ? 'paid' : (existingBill.nextBillId != null ? 'transferred' : 'pending'),
       );
+
+      // Save updated bill
+      await DatabaseService.saveBill(updatedBill);
+
+      if (mounted) {
+        _showSuccess('بل اپڈیٹ ہو گیا');
+        Navigator.pop(context, updatedBill); // Return updated bill
+      }
+    } else {
+      // New bill mode: Create new bill
+      final previousRemaining = widget.linkedBill?.remaining ?? 0;
+      final billId = _uuid.v4();
+
+      final bill = Bill(
+        id: billId,
+        customerName: _customerController.text.trim(),
+        customerPhone: phoneNumber.isNotEmpty ? phoneNumber : null,
+        date: DateTime.now(),
+        items: billItems,
+        subtotal: _subtotal,
+        previousRemaining: previousRemaining,
+        discount: _discount,
+        total: _total,
+        received: _received,
+        remaining: _remaining,
+        linkedBillId: widget.linkedBill?.id,
+        status: _remaining <= 0 ? 'paid' : 'pending',
+      );
+
+      // Save to database
+      await DatabaseService.saveBill(bill);
+
+      // Update linked bill if exists - set nextBillId and status to transferred
+      if (widget.linkedBill != null) {
+        widget.linkedBill!.nextBillId = billId;
+        widget.linkedBill!.status = 'transferred';
+        await DatabaseService.saveBill(widget.linkedBill!);
+      }
+
+      if (mounted) {
+        _showSuccess('بل محفوظ ہو گیا');
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const BillsScreen()),
+        );
+      }
     }
   }
 
@@ -222,7 +285,9 @@ class _NewBillScreenState extends State<NewBillScreen> {
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('dd/MM/yyyy');
-    final today = dateFormat.format(DateTime.now());
+    final displayDate = widget.isEditMode
+        ? dateFormat.format(widget.editBill!.date)
+        : dateFormat.format(DateTime.now());
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -230,7 +295,7 @@ class _NewBillScreenState extends State<NewBillScreen> {
         backgroundColor: Colors.grey[100],
         appBar: AppBar(
           title: Text(
-            'نیا بل',
+            widget.isEditMode ? 'بل میں ترمیم' : 'نیا بل',
             style: GoogleFonts.notoNastaliqUrdu(
               fontSize: 20,
               fontWeight: FontWeight.bold,
@@ -265,7 +330,7 @@ class _NewBillScreenState extends State<NewBillScreen> {
                                 ),
                                 const SizedBox(width: 10),
                                 Text(
-                                  today,
+                                  displayDate,
                                   style: GoogleFonts.roboto(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
@@ -461,7 +526,9 @@ class _NewBillScreenState extends State<NewBillScreen> {
                     // Summary section
                     BillSummary(
                       subtotal: _subtotal,
-                      previousBalance: widget.linkedBill?.remaining ?? 0,
+                      previousBalance: widget.isEditMode
+                          ? widget.editBill!.previousRemaining
+                          : (widget.linkedBill?.remaining ?? 0),
                       discountController: _discountController,
                       receivedController: _receivedController,
                       total: _total,
@@ -481,9 +548,9 @@ class _NewBillScreenState extends State<NewBillScreen> {
               padding: const EdgeInsets.all(12),
               child: ElevatedButton.icon(
                 onPressed: _saveBill,
-                icon: const Icon(Icons.save, size: 28),
+                icon: Icon(widget.isEditMode ? Icons.check : Icons.save, size: 28),
                 label: Text(
-                  'محفوظ کریں',
+                  widget.isEditMode ? 'اپڈیٹ کریں' : 'محفوظ کریں',
                   style: GoogleFonts.notoNastaliqUrdu(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,

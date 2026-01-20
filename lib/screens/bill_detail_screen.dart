@@ -230,6 +230,32 @@ class _BillDetailScreenState extends State<BillDetailScreen> {
     }
   }
 
+  Future<void> _editBill() async {
+    final updatedBill = await Navigator.push<Bill>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NewBillScreen(editBill: _bill),
+      ),
+    );
+
+    // If bill was updated, refresh the display
+    if (updatedBill != null && mounted) {
+      setState(() {
+        _bill = updatedBill;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'بل اپڈیٹ ہو گیا',
+            style: GoogleFonts.notoNastaliqUrdu(),
+            textDirection: TextDirection.rtl,
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
   Future<void> _shareBillPdf() async {
     // Show loading indicator
     showDialog(
@@ -430,6 +456,11 @@ class _BillDetailScreenState extends State<BillDetailScreen> {
           backgroundColor: const Color(0xFF1a3a6e),
           foregroundColor: Colors.white,
           actions: [
+            IconButton(
+              onPressed: _editBill,
+              icon: const Icon(Icons.edit),
+              tooltip: 'ترمیم کریں',
+            ),
             IconButton(
               onPressed: _shareBillPdf,
               icon: const Icon(Icons.share),
